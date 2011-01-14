@@ -1,0 +1,458 @@
+// By Jason Sundram 
+
+void setup()
+{
+    size(window.innerWidth, window.innerHeight);
+    background(128);    
+    
+    var seed = minute()*60*1000 + second()*1000 + millis();
+    //seed = 2767015;
+    console.log("seed:", seed);
+    init_genrand(seed); // TODO: seed with time or something
+
+    window.onresize = function() { redraw(); }
+    noLoop();
+}
+
+void draw()
+{
+    var m = millis();
+    size(window.innerWidth, window.innerHeight); // Necessary?
+    
+    draw_original(); // asymptotic, shows roughly balanced births
+    //draw_asymptotic();// asymptotic, circular
+    //draw_all();       // small multiples. Lots of them, unfortunately.
+    // draw_all_pie();  // lots of experiments, summarized with pie
+    
+    console.log("total time to draw: ", millis() - m);
+}
+
+// Returns an array of arrays corresponding to the number of girls each of n parents had in each of the trials.
+// number of rows ~ trials, number of columns ~ n.
+// generations is the max number of children.
+Array run_simulation(var n, var generations, var trials)
+{
+    var results = [];
+    for (var trial = 0; trial < trials; trial++)
+    {
+        var births = [];
+        var start = 0;
+        // all we need to store is the number of girls each family had. we know they each had one boy.
+        // TODO: reconcile this with generations.
+        results[trial] = [];        
+        for (var generation = 0; generation < generations; generation += 1)
+        {
+            if (start == n)
+            {
+                console.log("WHA?");
+                break;
+            }
+            
+            // pop out some babies of random sex.
+            for (var i = 0; i < n-start; i++)
+            {
+                births[i] = genrand_real1() < .5;
+            }
+            
+            // figure out what just happened
+            births.sort();
+            var partition = births.indexOf(true);
+            var boys = partition == -1 ? births.length : partition;
+            var girls = partition == -1 ? 0 : births.length - partition;
+            
+            // log the results
+            if (partition == -1)
+            {
+                for (var i = start; i < n; i++)
+                    results[trial][i] = generation;
+                /*
+                console.log("Breaking early (no girls), got boys:", births.length, "results:",
+                    results[trial][0], results[trial][1], results[trial][2], results[trial][3]);*/
+
+                break;
+            }
+            else
+            {
+                for (var i = start; i < start+partition; i++)
+                    results[trial][i] = generation;
+                /*                    
+                console.log("start:", start, "partition:", partition, "boys:", boys, "girls:", girls, "results:",
+                    results[trial][0], results[trial][1], results[trial][2], results[trial][3]);*/
+            }
+
+            
+            // prepare for next iteration
+            start += partition;
+            births.length = 0; // resize the array
+        }
+    }
+    
+    return results;
+}
+
+var sum(var a)
+{
+    var s = 0;
+    for (var i = 0; i < a.length; i++)
+        s += a[i];
+    return s;
+}
+//quick and dirty array equality test, not for general purpose use.
+boolean equal(var a1, var a2)
+{
+    if (a1.length != a2.length)
+        return false;
+    for (var i = 0; i < a1.length; i++)
+        if (a1[i] != a2[i])
+            return false;
+            
+    return true;
+}
+
+// array hashing, using the fact that we know the max possible value in the array to avoid collisions.
+// and also the fact that the array is small (less than 7 entries) so we can avoid overflow.
+boolean hash(var a, var m)
+{
+    var n = 1;
+    var v = 0;
+    for (var i = 0; i < a.length; i++)
+    {
+        v += a[i]*n;
+        n *= m;
+    }
+    return v;
+}
+
+Array unhash(var n, var m, var len)
+{
+    var a = [];
+    for (var i = 0; i < len; i++)
+    {
+        a[i] = int(n % m)   ;
+        n /= m;
+    }
+    return a;
+}
+
+void draw_all_pie()
+{
+    // run the simulation
+    var n = 4;      
+    var generations = 30; // will be fewer if births stop happening.
+    var trials = 60;
+    var results = run_simulation(n, generations, trials);    
+  
+    // tabulate the results
+    var tally = [];    
+    var configurations = 0;
+    for (var i = 0; i < results.length; i++)
+    {
+        var v = hash(results[i], generations);
+        if (v in tally)
+            tally[v] += 1;
+        else
+            tally[v] = 1;
+    }
+
+    var keys = [];
+    for (var v in tally)
+    {
+        //console.log("tally[", v, "]:", tally[v]);  
+        keys.push(v);
+    }
+    keys.sort(function(a,b){return sum(unhash(b, generations, n)) - sum(unhash(a, generations, n));});
+
+    // Draw
+    
+    // Show how many girls
+    var total_girls = 0;
+    var avg_girls = 0;
+    for (var a in results)
+    {
+        var sg = sum(results[a]);
+        total_girls += sg;
+        avg_girls += sg / (sg + n);
+    }
+    avg_girls = 100 * avg_girls / results.length;
+    var percent_girls = 100.0 * total_girls / (total_girls + n*trials);
+    stroke(0);
+    PFont fontA = loadFont("Arial");
+    textFont(fontA, 25); 
+    text("Trials: " + trials, 25, 25);
+    text("Overall Percent Female: " + percent_girls.toPrecision(4), 25, 55);
+    text("Average Percent Female: " + avg_girls.toPrecision(4), 25, 85);
+    
+
+    // Make the circle deal
+    var x = width / 2;
+    var y = height / 2;
+    var m = 2*min(x, y) - 40; // padding, so we know the circle will fit even with wide strokes
+
+    var T = 0;
+    noStroke();
+    fill(0, 0, 255);
+    ellipse(x, y, m+2, m+2); // smoother
+    fill(255, 0, 0);
+    for (var k in keys)
+    {
+        var v = keys[k];        
+        var f = tally[v] / trials;
+        var s = sum(unhash(v, generations, n));
+        var g = s / (s + n);
+        var rads = T + TWO_PI * f;
+        //console.log(unhash(v, generations, n), f, s, g, rads);                
+        // boys
+        // fill(0, 0, 255);
+        // console.log("arc", x, y, m, T, rads);
+        // arc(x, y, m, m, T, rads);
+                
+        // girls
+        //fill(255, 0, 0);
+        console.log("arc", T, rads);
+        arc(x, y, m*g, m*g, T, rads);
+        
+        T = rads;   
+    }
+}
+
+// show all the cases that happened
+void draw_all()
+{
+    // run the simulation
+    var n = 4;      
+    var generations = 30; // will be fewer if births stop happening.
+    var trials = 3000;
+    var results = run_simulation(n, generations, trials);    
+  
+    // tabulate the results
+    var tally = [];    
+    var configurations = 0;
+    for (var i = 0; i < results.length; i++)
+    {
+        var v = hash(results[i], generations);
+        if (v in tally)
+            tally[v] += 1;
+        else
+            tally[v] = 1;
+    }
+
+    var most_girls = 0;
+    var keys = [];
+    for (var v in tally)
+    {
+        //console.log("tally[", v, "]:", tally[v]);  
+        configurations += 1;
+        most_girls = max(most_girls, max(unhash(v, generations, n)));
+        keys.push(v);
+    }
+    keys.sort(function(a,b){return tally[b] - tally[a];});
+    // console.log("Total Configurations:", configurations, "Most girls:", most_girls);
+
+    // do some drawing
+    var cols = 1 + int(Math.sqrt(configurations));
+    var padding = 10;
+    var x = padding;
+    var y = padding;
+    var item_w = (( width - padding) / cols) - padding;
+    var item_h = ((height - padding) / cols) - padding;
+    PFont fontA = loadFont("Arial");
+    textFont(fontA, n*item_h / (1 + most_girls)); // a bit of a hack
+    console.log("Layout:", cols, item_w, item_h, n * item_h / (1 + most_girls));
+    var item = 0;
+    var total = 0;
+    for (var k in keys)
+    {
+        var v = keys[k];
+        var a = unhash(v, generations, n);
+        var count = tally[v];        
+        var h = 1 + most_girls;// 1 + max(a);
+        
+        //if (count / trials < .01) continue;
+        
+        total += count;
+        // paint 
+        rect(x, y, item_w, item_h);
+        var sx = item_w / n;
+        var sy = item_h / h;
+        pushStyle();
+        fill(0);
+        text((100 * count / trials).toPrecision(2) + "%", x, y, sx*n, item_w);
+        //text(count, x, y, sx*n, item_w);
+        popStyle();
+        
+        pushStyle();
+        fill(255, 0, 0);
+        for (var i = 0; i < n; i++)
+        {
+            for (var j = 0; j < a[i]; j++)
+            {
+                //rect(x + item_w - sx*(i+1), y + item_h - sy*(j+1), sx, sy);
+                rect(x + sx*i, y + item_h - sy*(j+1), sx, sy);
+            }
+            pushStyle();
+            fill(0, 0, 255);
+            //rect(x + item_w - sx*(i+1), y + item_h - sy*(j+1), sx, sy);
+            rect(x + sx*i, y + item_h - sy*(j+1), sx, sy);
+            popStyle();
+        }
+        
+        popStyle();
+        
+        // move forward
+        x += item_w + padding;
+        item++;   
+        if (item % cols == 0)
+        {
+            y += item_h + padding;
+            x = padding;
+        }
+    }
+    
+    console.log("total trials shown: ", total);
+}
+
+// Show what happens for large n.
+void draw_asymptotic()
+{
+    // Set parameters
+    var n = 1000*1000; // number of families       
+    var generations = 30; // will be fewer if births stop happening.
+    var trials = 1;
+    
+    // run simulation
+    var results = run_simulation(n, generations, trials);
+    
+    // Display results
+    var ts = 25, tx = 25, ty=25;
+    PFont fontA = loadFont("Arial");
+    textFont(fontA, ts); 
+    fill(0);
+    text("Initial Population: " + n, tx, ty);
+    ty += ts + 5;
+    
+    var families = results[0];
+    var rings = 1 + max(families);        
+    text("Generations: " + rings, tx, ty);
+    ty += ts + 5;
+    
+    var total_girls = 0;
+    for (var i in families)
+        total_girls += families[i];
+    var percent_girls = 100 * total_girls / (total_girls + n);    
+        text("Percentage Female: " + percent_girls.toPrecision(4), tx, ty);
+    ty += ts + 5;
+
+    var x = width / 2;
+    var y = height / 2;
+    var m = min(x, y) - 40; // padding, so we know the circle will fit even with wide strokes
+    var core = 100; // inside    
+    var i = 0;
+    var increment = (m - core) / rings;
+    
+    strokeWeight(increment);
+    noFill();
+    strokeCap(PROJECT); // as opposed to rounded ends to the arcs.
+    var total_boys = 0;
+    var start_angle = 3*PI / 2;    
+    
+    for (var i = 0; i < rings; i++)
+    {        
+        var boys = families.filter(function(x){return x == i;}).length;        
+        total_boys += boys;
+        var girls = n - total_boys;        
+        
+        var radius = core + (rings-i) * increment; // go from outside in
+        var frac_boys = boys / (boys + girls);        
+        var end_angle = start_angle - frac_boys * TWO_PI;
+        
+        //console.log("generation:", i+1, "boys, girls", boys, girls);
+        // paint boys
+        if (0 < frac_boys)
+        {
+            stroke(0, 0, 255);            
+            //console.log(end_angle, start_angle, boys, girls);
+            arc(x, y, 2*radius, 2*radius, end_angle, start_angle);
+        }
+        
+        // paint girls:
+        if (frac_boys < 1)
+        {
+            stroke(255, 0, 0);
+            //console.log(end_angle, start_angle);
+            arc(x, y, 2*radius, 2*radius, start_angle, end_angle + TWO_PI);
+        }
+    }
+    
+    // TODO: would like to run 1000 simulations and blend the results together
+}
+
+void draw_original()
+{
+    // the following two lines allow us to pretend to work on the full screen (avoid math)
+    // but show up all centered and nice.
+    scale(.9);
+    translate(.05*width, .05*height);
+    var n = width;  
+    var generations = 30; // will be fewer if births stop happening.
+    
+    var avg_fgirls = 0;
+    var max_girls = 0;
+
+    var y = 1;
+    var births = [];
+    var start = 0, end = n;
+    var total_boys = 0, total_girls = 0;
+    var H = 0;
+    var hh = 2*height / generations;
+    for (var generation = 0; generation < generations; generation++)
+    {
+        if ((end - start) == 0)
+            break;
+        
+        for (var i = 0; i < end-start; i++)
+        {
+            births[i] = genrand_real1() < .5;
+        }
+        
+        births.sort();
+        var partition = births.indexOf(true);
+        if (partition == -1)
+        {
+            total_boys += births.length;
+            console.log("Breaking early (no girls), got boys:", births.length);
+            break;
+        }
+
+        var boys = partition;
+        var girls = births.length - partition;
+        end = start + partition;
+        console.log("births:", births.length, " -> boys:", boys, "girls:", girls, "fraction girls:", girls / (girls + boys));
+        
+        total_boys += boys;
+        total_girls += girls;
+        // var y = 2*generation + 1
+        //stroke(0, 0, 255); // blue
+        //line(start, y, end, y);
+        fill(0, 0, 255); // blue
+        //console.log("blue rect", start, H+y, end-start, hh);
+        rect(start, H, end-start, hh);
+        
+        //stroke(255, 0, 0); // red
+        //line(end, y, n, y);
+        fill(255, 0, 0); // red
+        rect(end, H, n - end, hh);
+        //console.log("red rect", end, H+y, n-end, hh);
+        
+        
+        // prepare for next iteration
+        H += hh;
+        start = end;
+        end = n;
+        births.length = 0; // resize the array
+    }
+    var generation = (y - 1) / 2;
+    console.log("boys:", total_boys, "girls: ", total_girls, "frac girls:", total_girls / (total_girls + total_boys), "generations:", generation);
+    avg_fgirls += total_girls / (total_girls + total_boys)
+    max_girls = max(max_girls, generation);
+}
+
